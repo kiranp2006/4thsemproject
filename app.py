@@ -1,102 +1,58 @@
 import streamlit as st
-import sqlite3
-import pandas as pd
+from database import Session
+from utils import login_user, logout
 
-# Initialize database
-def init_db():
-    conn = sqlite3.connect('institution.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS institutions
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT NOT NULL,
-                  address TEXT,
-                  courses TEXT,
-                  contact TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS registrations
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  student_name TEXT NOT NULL,
-                  email TEXT NOT NULL,
-                  institution_id INTEGER,
-                  registered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  FOREIGN KEY (institution_id) REFERENCES institutions(id))''')
-    conn.commit()
-    conn.close()
+st.set_page_config(page_title="Agri Equipment Rental", layout="wide")
 
-init_db()
+# Initialize session
+if 'user' not in st.session_state:
+    st.session_state['user'] = None
 
-# Helper functions
-def get_institutions():
-    conn = sqlite3.connect('institution.db')
-    df = pd.read_sql_query("SELECT * FROM institutions", conn)
-    conn.close()
-    return df
-
-def register_student(name, email, inst_id):
-    conn = sqlite3.connect('institution.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO registrations (student_name, email, institution_id) VALUES (?,?,?)",
-              (name, email, inst_id))
-    conn.commit()
-    conn.close()
-
-# Streamlit UI
-st.set_page_config(page_title="Student Registration Portal", layout="wide")
-st.title("🎓 Student Registration & Institution Info")
-
-menu = ["Home", "View Institutions", "Register", "Admin (Add Institution)"]
+# Sidebar navigation
+menu = ["Home", "Login", "Register", "List Equipment", "Search Equipment", "My Dashboard"]
 choice = st.sidebar.selectbox("Menu", menu)
 
+# Page routing
 if choice == "Home":
-    st.subheader("Welcome")
-    st.write("Use this portal to register at your preferred institution and view details about schools/colleges.")
+    st.title("🌾 Smart Agri Equipment Rental Platform")
+    st.write("Connect farmers with machinery they need.")
 
-elif choice == "View Institutions":
-    st.subheader("Institution Directory")
-    df = get_institutions()
-    if not df.empty:
-        for _, row in df.iterrows():
-            with st.expander(f"{row['name']}"):
-                st.write(f"**Address:** {row['address']}")
-                st.write(f"**Courses Offered:** {row['courses']}")
-                st.write(f"**Contact:** {row['contact']}")
-    else:
-        st.info("No institutions added yet.")
+elif choice == "Login":
+    # Login form
+    with st.form("login"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+        if submitted:
+            session = Session()
+            if login_user(username, password, session):
+                st.success("Logged in successfully!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
 
 elif choice == "Register":
-    st.subheader("Student Registration")
-    df = get_institutions()
-    if df.empty:
-        st.warning("No institutions available. Please contact admin.")
-    else:
-        with st.form("registration_form"):
-            name = st.text_input("Full Name")
-            email = st.text_input("Email")
-            inst_name = st.selectbox("Select Institution", df['name'].tolist())
-            submitted = st.form_submit_button("Register")
-            if submitted:
-                if name and email:
-                    inst_id = df[df['name'] == inst_name]['id'].values[0]
-                    register_student(name, email, inst_id)
-                    st.success(f"Registration successful for {name} at {inst_name}!")
-                else:
-                    st.error("Please fill all fields.")
-
-elif choice == "Admin (Add Institution)":
-    st.subheader("Add New Institution")
-    with st.form("add_institution"):
-        name = st.text_input("Institution Name")
-        address = st.text_area("Address")
-        courses = st.text_input("Courses Offered (comma separated)")
-        contact = st.text_input("Contact Email/Phone")
-        submitted = st.form_submit_button("Add Institution")
+    # Registration form
+    with st.form("register"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        email = st.text_input("Email")
+        role = st.selectbox("I am a", ["renter", "owner"])
+        location = st.text_input("Your location (city/area)")
+        submitted = st.form_submit_button("Register")
         if submitted:
-            if name:
-                conn = sqlite3.connect('institution.db')
-                c = conn.cursor()
-                c.execute("INSERT INTO institutions (name, address, courses, contact) VALUES (?,?,?,?)",
-                          (name, address, courses, contact))
-                conn.commit()
-                conn.close()
-                st.success(f"Institution '{name}' added!")
+            session = Session()
+            # Check if user exists
+            if session.query(User).filter_by(username=username).first():
+                st.error("Username already exists")
             else:
-                st.error("Institution name is required.")
+                new_user = User(
+                    username=username,
+                    password=hash_password(password),
+                    email=email,
+                    role=role,
+                    location=location
+                )
+                session.add(new_user)
+                session.commit()
+                st.success("Registration successful! Please login.")
